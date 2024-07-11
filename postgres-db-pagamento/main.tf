@@ -1,0 +1,91 @@
+# trigger v2
+
+terraform {
+  backend "s3" {
+    bucket = ""
+    key    = ""
+    region = "us-east-1"
+  }
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+data "terraform_remote_state" "eks_state" {
+  backend = "s3"
+
+  config = {
+    bucket = ""
+    key    = ""
+    region = "us-east-1"
+  }
+}
+
+resource "aws_security_group" "sg-rds-pagamento" {
+  name        = "SG-pos-tech-diner-rds-pagamento"
+  description = "pos-tech-diner"
+  vpc_id      = data.terraform_remote_state.eks_state.outputs["aws_vpc_main_id"]
+
+  ingress {
+    description = "VPC"
+    from_port   = 5433
+    to_port     = 5433
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  egress {
+    description = "VPC"
+    from_port   = 5433
+    to_port     = 5433
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+}
+
+resource "aws_db_subnet_group" "default" {
+  name = "aws_subnet_groups_rds_pagamento"
+  subnet_ids = [
+    data.terraform_remote_state.eks_state.outputs["aws_subnet_private_us_east_1a_id"],
+    data.terraform_remote_state.eks_state.outputs["aws_subnet_private_us_east_1b_id"]
+  ]
+
+  tags = {
+    Name = "My DB subnet group"
+  }
+}
+
+resource "aws_db_instance" "rds" {
+  db_name        = "postechdinerrdspagamento"
+  engine         = "postgres"
+  engine_version = "13.11"
+  identifier     = "rds-pos-tech-diner-pagamento"
+  # manage_master_user_password  = true 
+  username                     = ""
+  password                     = ""
+  instance_class               = "db.t3.micro"
+  storage_type                 = "gp2"
+  allocated_storage            = "20"
+  max_allocated_storage        = "30"
+  multi_az                     = false
+  vpc_security_group_ids       = [aws_security_group.sg-rds-pagamento.id]
+  db_subnet_group_name         = aws_db_subnet_group.default.name
+  apply_immediately            = true
+  skip_final_snapshot          = true
+  publicly_accessible          = false
+  deletion_protection          = true
+  performance_insights_enabled = true
+  backup_retention_period      = 1
+  backup_window                = "00:00-00:30"
+  copy_tags_to_snapshot        = true
+  delete_automated_backups     = true
+  port                         = 5433
+}
